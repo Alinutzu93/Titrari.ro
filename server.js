@@ -60,10 +60,12 @@ async function searchByImdbId(imdbId, type, season, episode) {
     }
     
     try {
-        // Titrari.ro folosește "cautare" cu parametrul z1=2 pentru IMDB ID
-        // z1=2 înseamnă căutare după IMDB ID
+        // Titrari.ro folosește "numaicautamcaneiesepenas" (Căutare avansată) pentru IMDB ID
+        // z5 = IMDB ID (fără "tt")
+        // z8=1 = limba română
+        // z11=0 = toate tipurile (filme + seriale)
         const cleanImdbId = imdbId.replace('tt', '');
-        const searchUrl = `https://titrari.ro/index.php?page=cautare&z1=2&z2=${cleanImdbId}&z3=1&z4=1`;
+        const searchUrl = `https://titrari.ro/index.php?page=numaicautamcaneiesepenas&z7=&z2=&z5=${cleanImdbId}&z3=-1&z4=-1&z8=1&z9=All&z11=0&z6=0`;
         
         console.log(`🔍 Caut pe titrari.ro: ${imdbId}`);
         console.log(`🔗 URL: ${searchUrl}`);
