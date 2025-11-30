@@ -6,7 +6,7 @@ const cheerio = require('cheerio');
 // Definirea manifestului addon-ului
 const manifest = {
     id: 'ro.titrari.stremio',
-    version: '1.0.0',
+    version: '1.0.1',
     name: 'Titrari.ro',
     description: 'Subtitrări în limba română de pe titrari.ro - cel mai mare site de subtitrări românești',
     resources: ['subtitles'],
@@ -41,81 +41,35 @@ function normalize(text) {
         .trim();
 }
 
-// Funcție pentru a extrage ID-ul filmului din URL
-function extractMovieId(url) {
-    const match = url.match(/id=(\d+)/);
+// Funcție pentru a extrage ID-ul subtitrării din link sau text
+function extractSubtitleId(text) {
+    const match = text.match(/id[=:](\d+)/i);
     return match ? match[1] : null;
 }
 
-// Funcție pentru a găsi subtitrări pe pagina de rezultate căutare
-async function searchByImdbId(imdbId) {
-    const cacheKey = `search:${imdbId}`;
+// Funcție NOUĂ: căutare directă folosind pagina cautamsavedem
+async function searchDirectByImdb(imdbId, type, season, episode) {
+    const cacheKey = `direct:${imdbId}:${season || 'x'}:${episode || 'x'}`;
     
     if (cache.has(cacheKey)) {
         const cached = cache.get(cacheKey);
         if (Date.now() - cached.timestamp < CACHE_TTL) {
-            console.log('📦 Cache hit pentru', imdbId);
+            console.log('📦 Cache hit');
             return cached.data;
         }
     }
     
     try {
-        // Titrari.ro folosește "cautarecutare" pentru căutare cu IMDB
         const cleanImdbId = imdbId.replace('tt', '');
-        const searchUrl = `https://titrari.ro/index.php?page=cautarecutare&z7=&z2=&z5=${cleanImdbId}&z3=-1&z4=-1&z8=1&z9=All&z11=0&z6=0`;
         
-        console.log(`🔍 Caut: ${imdbId}`);
+        // Încercăm căutarea simplă după IMDB
+        // Format URL: index.php?page=cautare&z1=2&z2=IMDB_ID&z3=1&z4=1
+        const searchUrl = `https://titrari.ro/index.php?page=cautare&z1=2&z2=${cleanImdbId}&z3=1&z4=1`;
+        
+        console.log(`🔍 Căutare simplă: ${imdbId}`);
         console.log(`🔗 URL: ${searchUrl}`);
         
         const response = await axios.get(searchUrl, {
-            headers: COMMON_HEADERS,
-            timeout: 15000,
-            maxRedirects: 5
-        });
-
-        const $ = cheerio.load(response.data);
-        const results = [];
-        
-        // Căutăm toate link-urile către pagini de detalii filme
-        // Structura: <a href="index.php?page=movie_details&id=XXXXX">
-        $('a[href*="movie_details"]').each((i, elem) => {
-            const href = $(elem).attr('href');
-            if (href) {
-                const movieId = extractMovieId(href);
-                if (movieId) {
-                    // Găsim container-ul pentru a extrage titlul și detaliile
-                    const $parent = $(elem).closest('td, div, article');
-                    const title = $(elem).text().trim() || $parent.find('strong, b').first().text().trim();
-                    
-                    results.push({
-                        movieId: movieId,
-                        title: title,
-                        url: `https://titrari.ro/index.php?page=movie_details&id=${movieId}`
-                    });
-                }
-            }
-        });
-        
-        console.log(`✅ Găsite ${results.length} rezultate pentru ${imdbId}`);
-        
-        if (results.length > 0) {
-            cache.set(cacheKey, { data: results, timestamp: Date.now() });
-        }
-        
-        return results;
-        
-    } catch (error) {
-        console.error('❌ Eroare la căutare:', error.message);
-        return [];
-    }
-}
-
-// Funcție pentru a extrage subtitrările de pe pagina filmului
-async function getSubtitlesFromMovie(movieId, movieUrl, type, season, episode) {
-    try {
-        console.log(`📄 Accesez: ${movieUrl}`);
-        
-        const response = await axios.get(movieUrl, {
             headers: COMMON_HEADERS,
             timeout: 15000
         });
@@ -123,78 +77,84 @@ async function getSubtitlesFromMovie(movieId, movieUrl, type, season, episode) {
         const $ = cheerio.load(response.data);
         const subtitles = [];
         
-        // Extragem titlul filmului/serialului
-        const pageTitle = $('h1, h2, h3').first().text().trim() || 'Unknown';
-        console.log(`🎬 Film: ${pageTitle}`);
-        
-        // Căutăm toate link-urile de download
-        // Titrari.ro folosește: <a href="get.php?id=XXXXX">
-        $('a[href*="get.php"]').each((i, elem) => {
+        // Metoda 1: Căutăm direct link-uri get.php
+        $('a[href*="get.php?id="]').each((i, elem) => {
             const $elem = $(elem);
-            const downloadLink = $elem.attr('href');
+            const href = $elem.attr('href');
+            const subId = extractSubtitleId(href);
             
-            if (downloadLink && downloadLink.includes('get.php?id=')) {
-                // Găsim container-ul pentru detalii
-                const $container = $elem.closest('tr, div, article, section, td');
-                const containerText = $container.text();
+            if (subId) {
+                // Găsim contextul (container-ul părinte)
+                const $container = $elem.closest('tr, td, div, article');
+                const allText = $container.text();
                 
-                // Extragem informații
+                // Extragem detalii
+                let title = '';
                 let fps = '';
                 let translator = '';
                 let downloads = '0';
                 let releaseInfo = '';
                 
+                // Titlu - cautăm în link-uri cu cautamsavedem sau în heading-uri
+                $container.find('a[href*="cautamsavedem"], strong, b, h3, h4').each((j, titleElem) => {
+                    const text = $(titleElem).text().trim();
+                    if (text && text.length > 3 && text.length < 200) {
+                        title = text;
+                    }
+                });
+                
                 // FPS
-                const fpsMatch = containerText.match(/Framerate[:\s]*([0-9.]+)\s*FPS/i);
+                const fpsMatch = allText.match(/(\d+(?:\.\d+)?)\s*FPS/i);
                 if (fpsMatch) fps = fpsMatch[1];
                 
+                // Release info
+                const releaseMatch = allText.match(/([A-Z0-9][\w.-]{10,}(?:BluRay|WEB-?DL|WEBRip|HDTV|BRRip|BDRip)[\w.-]*)/i);
+                if (releaseMatch) releaseInfo = releaseMatch[1];
+                
                 // Traducător
-                const translatorMatch = containerText.match(/Traducator[:\s]*([^\n]+?)(?:Uploader|Framerate|Numar|$)/i);
+                const translatorMatch = allText.match(/Traducator[:\s]*([^\n\r]+?)(?:Uploader|Framerate|FPS|Numar|$)/i);
                 if (translatorMatch) {
-                    translator = translatorMatch[1]
-                        .trim()
-                        .replace(/\s+/g, ' ')
-                        .substring(0, 50); // Limităm lungimea
+                    translator = translatorMatch[1].trim().replace(/\s+/g, ' ').substring(0, 40);
                 }
                 
-                // Număr descărcări
-                const downloadsMatch = containerText.match(/Descarcari[:\s]*(\d+)/i);
+                // Descărcări
+                const downloadsMatch = allText.match(/Descarcari[:\s]*(\d+)/i);
                 if (downloadsMatch) downloads = downloadsMatch[1];
                 
-                // Info release (de pe rândul cu titlul)
-                const releaseMatch = containerText.match(/([A-Z0-9]+[\w.-]+(?:BluRay|WEB-DL|WEBRip|HDTV|BRRip)[\w.-]+)/i);
-                if (releaseMatch) releaseInfo = releaseMatch[1].substring(0, 60);
-                
-                // Verificăm dacă este pentru episodul corect (pentru seriale)
-                let isCorrectEpisode = true;
+                // Pentru seriale, verificăm sezon/episod
                 if (type === 'series' && season && episode) {
-                    const seasonPattern = new RegExp(`S0*${season}[\\s.E-]`, 'i');
-                    const episodePattern = new RegExp(`E0*${episode}(?![0-9])`, 'i');
-                    const fullPattern = new RegExp(`S0*${season}E0*${episode}`, 'i');
+                    const patterns = [
+                        new RegExp(`S0*${season}[\\s.E-]*E?0*${episode}(?!\\d)`, 'i'),
+                        new RegExp(`${season}x0*${episode}`, 'i'),
+                        new RegExp(`Sezon[ul\\s]*0*${season}[\\s.,E-]*(?:Ep\\.?|Episod)[\\s]*0*${episode}`, 'i')
+                    ];
                     
-                    const textToCheck = pageTitle + ' ' + releaseInfo + ' ' + containerText;
-                    isCorrectEpisode = fullPattern.test(textToCheck) || 
-                                      (seasonPattern.test(textToCheck) && episodePattern.test(textToCheck));
+                    const textToCheck = title + ' ' + releaseInfo + ' ' + allText;
+                    const matches = patterns.some(p => p.test(textToCheck));
                     
-                    if (!isCorrectEpisode) {
+                    if (!matches) {
                         console.log(`⏭️  Skip: nu este S${season}E${episode}`);
-                        return; // Skip acest rezultat
+                        return;
                     }
                 }
                 
-                // Construim titlul descriptiv
+                // Construim titlul display
                 let displayTitle = '🇷🇴 Titrari.ro';
-                if (releaseInfo) displayTitle += ` - ${releaseInfo}`;
+                
+                if (title && !title.includes('Descarca')) {
+                    displayTitle += ` - ${title.substring(0, 60)}`;
+                } else if (releaseInfo) {
+                    displayTitle += ` - ${releaseInfo}`;
+                }
+                
                 if (fps) displayTitle += ` [${fps} FPS]`;
                 if (translator) displayTitle += ` (${translator})`;
                 if (downloads !== '0') displayTitle += ` ↓${downloads}`;
                 
-                const fullUrl = downloadLink.startsWith('http') 
-                    ? downloadLink 
-                    : `https://titrari.ro/${downloadLink}`;
+                const fullUrl = href.startsWith('http') ? href : `https://titrari.ro/${href}`;
                 
                 subtitles.push({
-                    id: `titrari:${movieId}:${i}`,
+                    id: `titrari:${subId}`,
                     url: fullUrl,
                     lang: 'ron',
                     title: displayTitle,
@@ -205,13 +165,45 @@ async function getSubtitlesFromMovie(movieId, movieUrl, type, season, episode) {
             }
         });
         
-        // Sortăm după popularitate
+        // Metoda 2: Căutăm în text pentru pattern-uri de ID-uri
+        if (subtitles.length === 0) {
+            console.log('🔄 Încerc metoda alternativă...');
+            
+            // Căutăm toate aparițiile de "Descarcari:" urmate de un link
+            const pageText = $.html();
+            const idMatches = pageText.match(/get\.php\?id=(\d+)/g);
+            
+            if (idMatches) {
+                console.log(`📋 Găsite ${idMatches.length} potențiale subtitrări în HTML`);
+                
+                // Pentru fiecare ID găsit, creăm o subtitrare
+                const uniqueIds = [...new Set(idMatches.map(m => m.match(/\d+/)[0]))];
+                
+                uniqueIds.forEach((id, index) => {
+                    subtitles.push({
+                        id: `titrari:${id}`,
+                        url: `https://titrari.ro/get.php?id=${id}`,
+                        lang: 'ron',
+                        title: `🇷🇴 Titrari.ro - Subtitrare #${index + 1}`,
+                        downloads: 0
+                    });
+                });
+            }
+        }
+        
+        // Sortare după popularitate
         subtitles.sort((a, b) => b.downloads - a.downloads);
+        
+        console.log(`📊 Total: ${subtitles.length} subtitrări`);
+        
+        if (subtitles.length > 0) {
+            cache.set(cacheKey, { data: subtitles, timestamp: Date.now() });
+        }
         
         return subtitles;
         
     } catch (error) {
-        console.error('❌ Eroare la accesarea paginii:', error.message);
+        console.error('❌ Eroare:', error.message);
         return [];
     }
 }
@@ -223,45 +215,13 @@ async function searchSubtitles(imdbId, type, season, episode) {
         console.log(`🎯 Cerere: ${type} - ${imdbId}${season ? ` S${season}E${episode}` : ''}`);
         console.log(`⏰ ${new Date().toISOString()}`);
         
-        // Pasul 1: Căutăm pe titrari.ro după IMDB ID
-        const searchResults = await searchByImdbId(imdbId);
+        // Căutare directă
+        const subtitles = await searchDirectByImdb(imdbId, type, season, episode);
         
-        if (searchResults.length === 0) {
-            console.log('❌ Nu s-au găsit rezultate');
-            console.log('='.repeat(60));
-            return [];
-        }
-        
-        // Pasul 2: Extragem subtitrările din fiecare rezultat
-        const allSubtitles = [];
-        
-        // Procesăm primele 3 rezultate (pentru a nu face prea multe cereri)
-        const resultsToProcess = searchResults.slice(0, 3);
-        
-        for (const result of resultsToProcess) {
-            console.log(`\n📂 Procesez: ${result.title} (ID: ${result.movieId})`);
-            
-            const subs = await getSubtitlesFromMovie(
-                result.movieId,
-                result.url,
-                type,
-                season,
-                episode
-            );
-            
-            allSubtitles.push(...subs);
-            
-            // Delay mic între cereri pentru a nu suprasolicita serverul
-            await new Promise(resolve => setTimeout(resolve, 500));
-        }
-        
-        // Sortăm final după popularitate
-        allSubtitles.sort((a, b) => b.downloads - a.downloads);
-        
-        console.log(`\n📊 Total găsite: ${allSubtitles.length} subtitrări`);
+        console.log(`\n📊 Rezultat final: ${subtitles.length} subtitrări`);
         console.log('='.repeat(60));
         
-        return allSubtitles;
+        return subtitles;
         
     } catch (error) {
         console.error('❌ Eroare generală:', error.message);
@@ -309,7 +269,7 @@ serveHTTP(builder.getInterface(), {
 });
 
 console.log('\n' + '🚀'.repeat(30));
-console.log('✅ Addon Titrari.ro PORNIT!');
+console.log('✅ Addon Titrari.ro v1.0.1 PORNIT!');
 console.log(`📍 Port: ${port}`);
 console.log(`🌐 Manifest Local: http://localhost:${port}/manifest.json`);
 console.log(`🌐 Pentru Render.com: https://YOUR-APP.onrender.com/manifest.json`);
