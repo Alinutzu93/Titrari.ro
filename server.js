@@ -125,8 +125,59 @@ function normalize(text) {
         .trim();
 }
 
+// Funcție pentru a găsi episodul corect în arhivă (pentru seriale)
+function findEpisodeFile(fileNames, season, episode) {
+    if (!season || !episode) {
+        // Dacă nu e serial, returnăm primul fișier găsit
+        return fileNames.find(name => 
+            name.toLowerCase().endsWith('.srt') || 
+            name.toLowerCase().endsWith('.sub')
+        );
+    }
+    
+    // Pattern-uri pentru a detecta episodul corect
+    const patterns = [
+        new RegExp(`S0*${season}E0*${episode}[^0-9]`, 'i'),  // S01E05
+        new RegExp(`${season}x0*${episode}[^0-9]`, 'i'),     // 1x05
+        new RegExp(`S0*${season}\\.E0*${episode}`, 'i'),     // S01.E05
+        new RegExp(`[^0-9]0*${season}0*${episode}[^0-9]`, 'i'), // 105 (dacă e single digit season)
+        new RegExp(`Episode[\\s._-]*0*${episode}`, 'i'),     // Episode 05
+        new RegExp(`Ep0*${episode}[^0-9]`, 'i'),             // Ep05
+        new RegExp(`E0*${episode}[^0-9]`, 'i'),              // E05
+    ];
+    
+    console.log(`🔍 Caut episod S${season}E${episode} în ${fileNames.length} fișiere`);
+    
+    // Căutăm fișierul care se potrivește
+    for (const fileName of fileNames) {
+        const lowerName = fileName.toLowerCase();
+        
+        // Verificăm dacă e fișier de subtitrare
+        if (!lowerName.endsWith('.srt') && !lowerName.endsWith('.sub')) {
+            continue;
+        }
+        
+        console.log(`   Verific: ${fileName}`);
+        
+        // Verificăm pattern-urile
+        for (const pattern of patterns) {
+            if (pattern.test(fileName)) {
+                console.log(`   ✅ MATCH: ${fileName}`);
+                return fileName;
+            }
+        }
+    }
+    
+    console.log(`   ⚠️ Nu s-a găsit episodul exact, folosesc primul .srt găsit`);
+    // Dacă nu găsim match exact, returnăm primul .srt
+    return fileNames.find(name => 
+        name.toLowerCase().endsWith('.srt') || 
+        name.toLowerCase().endsWith('.sub')
+    );
+}
+
 // Funcție pentru a extrage/descărca subtitrare (ZIP, RAR sau direct SRT/SUB)
-async function extractSrtFromZip(downloadUrl, subId) {
+async function extractSrtFromArchive(downloadUrl, subId, season = null, episode = null) {
     try {
         console.log(`📥 Descarc subtitrare: ${downloadUrl}`);
         
@@ -157,23 +208,40 @@ async function extractSrtFromZip(downloadUrl, subId) {
                 
                 console.log(`📦 Fișiere în ZIP: ${zipEntries.length}`);
                 
-                for (const entry of zipEntries) {
+                // Colectăm toate fișierele .srt și .sub
+                const subtitleFiles = [];
+                zipEntries.forEach(entry => {
                     const fileName = entry.entryName.toLowerCase();
                     console.log(`   - ${entry.entryName}`);
                     
                     if (fileName.endsWith('.srt') || fileName.endsWith('.sub')) {
-                        console.log(`✅ Găsit subtitrare: ${entry.entryName}`);
-                        const content = entry.getData();
-                        
-                        // Folosim funcția de decodare inteligentă
-                        const textContent = decodeRomanianText(content);
-                        
-                        return textContent;
+                        subtitleFiles.push(entry.entryName);
                     }
+                });
+                
+                console.log(`📄 Găsite ${subtitleFiles.length} fișiere de subtitrări`);
+                
+                // Găsim fișierul corect pentru episod
+                const targetFile = findEpisodeFile(subtitleFiles, season, episode);
+                
+                if (!targetFile) {
+                    console.log('⚠️ Nu s-a găsit fișier SRT în ZIP');
+                    return null;
                 }
                 
-                console.log('⚠️ Nu s-a găsit fișier SRT în ZIP');
-                return null;
+                console.log(`✅ Folosesc: ${targetFile}`);
+                
+                // Extragem fișierul specific
+                const entry = zipEntries.find(e => e.entryName === targetFile);
+                if (!entry) {
+                    console.log('❌ Eroare: fișierul nu mai există în arhivă');
+                    return null;
+                }
+                
+                const content = entry.getData();
+                const textContent = decodeRomanianText(content);
+                
+                return textContent;
                 
             } catch (zipError) {
                 console.error(`❌ Eroare extragere ZIP: ${zipError.message}`);
@@ -191,28 +259,41 @@ async function extractSrtFromZip(downloadUrl, subId) {
                 
                 console.log(`📦 Fișiere în RAR: ${fileHeaders.length}`);
                 
-                for (const fileHeader of fileHeaders) {
+                // Colectăm toate fișierele .srt și .sub
+                const subtitleFiles = [];
+                fileHeaders.forEach(fileHeader => {
                     const fileName = fileHeader.name.toLowerCase();
                     console.log(`   - ${fileHeader.name}`);
                     
                     if (fileName.endsWith('.srt') || fileName.endsWith('.sub')) {
-                        console.log(`✅ Găsit subtitrare: ${fileHeader.name}`);
-                        
-                        const extracted = extractor.extract({ files: [fileHeader.name] });
-                        const files = [...extracted.files];
-                        
-                        if (files.length > 0 && files[0].extraction) {
-                            const content = files[0].extraction;
-                            
-                            // Folosim funcția de decodare inteligentă
-                            const textContent = decodeRomanianText(Buffer.from(content));
-                            
-                            return textContent;
-                        }
+                        subtitleFiles.push(fileHeader.name);
                     }
+                });
+                
+                console.log(`📄 Găsite ${subtitleFiles.length} fișiere de subtitrări`);
+                
+                // Găsim fișierul corect pentru episod
+                const targetFile = findEpisodeFile(subtitleFiles, season, episode);
+                
+                if (!targetFile) {
+                    console.log('⚠️ Nu s-a găsit fișier SRT în RAR');
+                    return null;
                 }
                 
-                console.log('⚠️ Nu s-a găsit fișier SRT în RAR');
+                console.log(`✅ Folosesc: ${targetFile}`);
+                
+                // Extragem fișierul specific
+                const extracted = extractor.extract({ files: [targetFile] });
+                const files = [...extracted.files];
+                
+                if (files.length > 0 && files[0].extraction) {
+                    const content = files[0].extraction;
+                    const textContent = decodeRomanianText(Buffer.from(content));
+                    
+                    return textContent;
+                }
+                
+                console.log('⚠️ Nu s-a putut extrage fișierul din RAR');
                 return null;
                 
             } catch (rarError) {
@@ -493,7 +574,8 @@ const server = http.createServer(async (req, res) => {
     
     // Endpoint pentru descărcare subtitrări
     if (parsedUrl.pathname.startsWith('/subtitle/')) {
-        const match = parsedUrl.pathname.match(/\/subtitle\/(\d+)\.srt/);
+        // Format poate fi: /subtitle/12345.srt sau /subtitle/12345:1:5.srt (cu season:episode)
+        const match = parsedUrl.pathname.match(/\/subtitle\/(\d+)(?::(\d+):(\d+))?\.srt/);
         
         if (!match) {
             res.writeHead(404, { 'Content-Type': 'text/plain' });
@@ -502,6 +584,9 @@ const server = http.createServer(async (req, res) => {
         }
         
         const subId = match[1];
+        const season = match[2] || null;  // Poate fi undefined pentru filme
+        const episode = match[3] || null;
+        
         const originalUrl = subtitleUrlCache.get(subId);
         
         if (!originalUrl) {
@@ -510,11 +595,11 @@ const server = http.createServer(async (req, res) => {
             return;
         }
         
-        console.log(`\n📥 Request subtitrare: ${subId}`);
+        console.log(`\n📥 Request subtitrare: ${subId}${season ? ` S${season}E${episode}` : ''}`);
         console.log(`🔗 URL original: ${originalUrl}`);
         
         try {
-            const srtContent = await extractSrtFromZip(originalUrl, subId);
+            const srtContent = await extractSrtFromArchive(originalUrl, subId, season, episode);
             
             if (!srtContent) {
                 res.writeHead(500, { 'Content-Type': 'text/plain' });
@@ -524,7 +609,7 @@ const server = http.createServer(async (req, res) => {
             
             res.writeHead(200, {
                 'Content-Type': 'text/plain; charset=utf-8',
-                'Content-Disposition': `attachment; filename="subtitle_${subId}.srt"`,
+                'Content-Disposition': `attachment; filename="subtitle_${subId}${season ? `_S${season}E${episode}` : ''}.srt"`,
                 'Access-Control-Allow-Origin': '*'
             });
             res.end(srtContent);
