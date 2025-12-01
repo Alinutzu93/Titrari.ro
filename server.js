@@ -10,7 +10,7 @@ const url = require('url');
 // Definirea manifestului addon-ului
 const manifest = {
     id: 'ro.titrari.stremio',
-    version: '1.0.3',
+    version: '1.0.5',
     name: 'Titrari.ro',
     description: 'Subtitrări în limba română de pe titrari.ro - cel mai mare site de subtitrări românești',
     resources: ['subtitles'],
@@ -19,6 +19,8 @@ const manifest = {
     idPrefixes: ['tt'],
     logo: 'https://titrari.ro/images/logo.png'
 };
+
+console.log('🚀 Titrari.ro Addon v1.0.5 - Series Archive Support ENABLED');
 
 const builder = new addonBuilder(manifest);
 
@@ -781,7 +783,8 @@ const port = process.env.PORT || 7000;
 
 server.listen(port, '0.0.0.0', () => {
     console.log('\n' + '🚀'.repeat(30));
-    console.log('✅ Addon Titrari.ro v1.0.3 PORNIT!');
+    console.log('✅ Addon Titrari.ro v1.0.5 PORNIT!');
+    console.log('🎬 SERIES ARCHIVE SUPPORT: ENABLED');
     console.log(`🔌 Port: ${port}`);
     console.log(`🌐 Manifest Local: http://localhost:${port}/manifest.json`);
     console.log(`🌐 Health Check: http://localhost:${port}/health`);
