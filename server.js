@@ -504,11 +504,14 @@ async function searchByImdbId(imdbId, type, season, episode) {
 // Funcție principală de căutare subtitrări
 async function searchSubtitles(imdbId, type, season, episode) {
     try {
+        // IMPORTANT: Extragem doar IMDB ID-ul de bază (fără :season:episode)
+        const baseImdbId = imdbId.split(':')[0];
+        
         console.log(`\n${'='.repeat(60)}`);
-        console.log(`🎯 Cerere: ${type} - ${imdbId}${season ? ` S${season}E${episode}` : ''}`);
+        console.log(`🎯 Cerere: ${type} - ${baseImdbId}${season ? ` S${season}E${episode}` : ''}`);
         console.log(`⏰ ${new Date().toISOString()}`);
         
-        const subtitles = await searchByImdbId(imdbId, type, season, episode);
+        const subtitles = await searchByImdbId(baseImdbId, type, season, episode);
         
         console.log(`\n📊 Rezultat final: ${subtitles.length} subtitrări`);
         console.log('='.repeat(60));
