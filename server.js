@@ -10,7 +10,7 @@ const manifest = {
     id: 'ro.titrari.stremio',
     version: '1.0.6',
     name: 'Titrari.ro',
-    description: 'Subtitrări în limba română de pe titrari.ro - cel mai mare site de subtitrări românești',
+    description: 'Subtitrari in limba romana de pe titrari.ro',
     resources: ['subtitles'],
     types: ['movie', 'series'],
     catalogs: [],
@@ -18,7 +18,7 @@ const manifest = {
     logo: 'https://titrari.ro/images/logo.png'
 };
 
-console.log('🚀🚀🚀 Titrari.ro Addon v1.0.6 LOADED - ARCHIVE EPISODE DETECTION 🚀🚀🚀');
+console.log('Titrari.ro Addon v1.0.6 LOADED');
 
 const builder = new addonBuilder(manifest);
 
@@ -28,35 +28,28 @@ const CACHE_TTL = 1000 * 60 * 30; // 30 minute
 
 // Headers comune pentru toate request-urile
 const COMMON_HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
     'Accept-Language': 'ro-RO,ro;q=0.9,en;q=0.8',
     'Referer': 'https://titrari.ro/'
 };
 
-// Funcție pentru a corecta diacriticele greșite din subtitrări vechi
+// Functie pentru a corecta diacriticele gresite
 function fixBrokenDiacritics(text) {
     const fixes = {
-        'ª': 'Ș', 'º': 'ș', 'Þ': 'Ț', 'þ': 'ț',
-        'Ã‰â„¢': 'ș', 'ÃˆÅ¡': 'ț', 'ÃƒÂ¢': 'â', 'ÃƒÂ®': 'î',
-        'Ä\u0192': 'ă', 'Ãˆâ€º': 'ț', 'Å¡': 'ș', 'Åž': 'Ș',
-        'ÅŸ': 'ș', 'Å¢': 'Ț', 'Å£': 'ț', 'Ã£': 'ă', 'Ãƒ': 'Ă',
-        'Ã¢â‚¬Å"': '"', 'Ã¢â‚¬': '"', 'Ã¢â‚¬â„¢': ''', 'Ã¢â‚¬"': '–',
-        'Ã¢â‚¬"': '—', 'Ã¢â‚¬Â¦': '…'
+        '\xAA': 'Ș',
+        '\xBA': 'ș',
+        '\xDE': 'Ț',
+        '\xFE': 'ț'
     };
     
     let fixedText = text;
     for (const [wrong, correct] of Object.entries(fixes)) {
-        const regex = new RegExp(wrong.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+        const regex = new RegExp(wrong, 'g');
         fixedText = fixedText.replace(regex, correct);
     }
     
-    return fixedText
-        .replace(/([cpdt])Ã£([a-z])/gi, '$1ă$2')
-        .replace(/Ã¾i/g, 'și')
-        .replace(/aÃ¾/g, 'ă')
-        .replace(/Âº/g, 'ș')
-        .replace(/Âª/g, 'Ș');
+    return fixedText;
 }
 
 // Decoder manual pentru Windows-1250
@@ -84,21 +77,21 @@ function decodeWindows1250(buffer) {
     return result;
 }
 
-// Funcție pentru a detecta și converti encoding-ul corect pentru română
+// Functie pentru a detecta si converti encoding-ul corect
 function decodeRomanianText(buffer) {
     let text = decodeWindows1250(buffer);
     text = fixBrokenDiacritics(text);
     
-    if (/[șțăîâȘȚĂÎÂ]/.test(text) && !/ï¿½/.test(text)) {
-        console.log('✅ Encoding detectat: windows-1250');
+    if (/[șțăîâȘȚĂÎÂ]/.test(text) && !/\uFFFD/.test(text)) {
+        console.log('Encoding: windows-1250');
         return text;
     }
     
     try {
         text = buffer.toString('utf8');
         text = fixBrokenDiacritics(text);
-        if (/[șțăîâȘȚĂÎÂ]/.test(text) && !/ï¿½/.test(text)) {
-            console.log('✅ Encoding detectat: utf8');
+        if (/[șțăîâȘȚĂÎÂ]/.test(text) && !/\uFFFD/.test(text)) {
+            console.log('Encoding: utf8');
             return text;
         }
     } catch (e) {}
@@ -106,15 +99,15 @@ function decodeRomanianText(buffer) {
     try {
         text = buffer.toString('latin1');
         text = fixBrokenDiacritics(text);
-        console.log('⚠️ Folosesc latin1 ca fallback');
+        console.log('Encoding: latin1 fallback');
         return text;
     } catch (e) {}
     
-    console.log('⚠️ Folosesc windows-1250 ca fallback final');
+    console.log('Encoding: windows-1250 fallback');
     return fixBrokenDiacritics(decodeWindows1250(buffer));
 }
 
-// Funcție pentru normalizare text
+// Functie pentru normalizare text
 function normalize(text) {
     return text
         .toLowerCase()
@@ -125,13 +118,13 @@ function normalize(text) {
         .trim();
 }
 
-// Funcție pentru a extrage ID-ul subtitrării din link
+// Functie pentru a extrage ID-ul subtitrarii
 function extractSubtitleId(href) {
     const match = href.match(/id=(\d+)/);
     return match ? match[1] : null;
 }
 
-// Funcție pentru a găsi episodul corect în arhivă
+// Functie pentru a gasi episodul corect in arhiva
 function findEpisodeFile(fileNames, season, episode) {
     if (!season || !episode) {
         return fileNames.find(name => 
@@ -150,7 +143,7 @@ function findEpisodeFile(fileNames, season, episode) {
         new RegExp(`E0*${episode}[^0-9]`, 'i')
     ];
     
-    console.log(`🔍 Caut episod S${season}E${episode} în ${fileNames.length} fișiere`);
+    console.log(`Caut episod S${season}E${episode}`);
     
     for (const fileName of fileNames) {
         const lowerName = fileName.toLowerCase();
@@ -160,23 +153,23 @@ function findEpisodeFile(fileNames, season, episode) {
         
         for (const pattern of patterns) {
             if (pattern.test(fileName)) {
-                console.log(`   ✅ MATCH: ${fileName}`);
+                console.log(`MATCH: ${fileName}`);
                 return fileName;
             }
         }
     }
     
-    console.log(`   ⚠️ Nu s-a găsit episodul exact, folosesc primul .srt`);
+    console.log('Nu s-a gasit episodul exact, folosesc primul .srt');
     return fileNames.find(name => 
         name.toLowerCase().endsWith('.srt') || 
         name.toLowerCase().endsWith('.sub')
     );
 }
 
-// Funcție pentru a extrage/descărca subtitrare (ZIP, RAR sau direct SRT/SUB)
+// Functie pentru a extrage subtitrare din arhiva
 async function extractSrtFromArchive(downloadUrl, subId, season = null, episode = null) {
     try {
-        console.log(`📥 Descarc subtitrare: ${downloadUrl}`);
+        console.log(`Descarc: ${downloadUrl}`);
         
         const response = await axios.get(downloadUrl, {
             headers: COMMON_HEADERS,
@@ -184,7 +177,7 @@ async function extractSrtFromArchive(downloadUrl, subId, season = null, episode 
             timeout: 30000
         });
         
-        console.log(`✅ Fișier descărcat: ${response.data.length} bytes`);
+        console.log(`Fisier descarcat: ${response.data.length} bytes`);
         
         const buffer = Buffer.from(response.data);
         const isZip = buffer[0] === 0x50 && buffer[1] === 0x4B;
@@ -192,7 +185,7 @@ async function extractSrtFromArchive(downloadUrl, subId, season = null, episode 
         
         // ZIP
         if (isZip) {
-            console.log('📦 Fișier ZIP detectat');
+            console.log('Fisier ZIP detectat');
             try {
                 const zip = new AdmZip(buffer);
                 const zipEntries = zip.getEntries();
@@ -207,7 +200,7 @@ async function extractSrtFromArchive(downloadUrl, subId, season = null, episode 
                 
                 const targetFile = findEpisodeFile(subtitleFiles, season, episode);
                 if (!targetFile) {
-                    console.log('⚠️ Nu s-a găsit fișier SRT în ZIP');
+                    console.log('Nu s-a gasit fisier SRT in ZIP');
                     return null;
                 }
                 
@@ -217,13 +210,13 @@ async function extractSrtFromArchive(downloadUrl, subId, season = null, episode 
                 const content = entry.getData();
                 return decodeRomanianText(content);
             } catch (zipError) {
-                console.error(`❌ Eroare ZIP: ${zipError.message}`);
+                console.error(`Eroare ZIP: ${zipError.message}`);
                 return null;
             }
         }
         // RAR
         else if (isRar) {
-            console.log('📦 Fișier RAR detectat');
+            console.log('Fisier RAR detectat');
             try {
                 const extractor = await createExtractorFromData({ data: buffer });
                 const list = extractor.getFileList();
@@ -239,7 +232,7 @@ async function extractSrtFromArchive(downloadUrl, subId, season = null, episode 
                 
                 const targetFile = findEpisodeFile(subtitleFiles, season, episode);
                 if (!targetFile) {
-                    console.log('⚠️ Nu s-a găsit fișier SRT în RAR');
+                    console.log('Nu s-a gasit fisier SRT in RAR');
                     return null;
                 }
                 
@@ -253,22 +246,22 @@ async function extractSrtFromArchive(downloadUrl, subId, season = null, episode 
                 
                 return null;
             } catch (rarError) {
-                console.error(`❌ Eroare RAR: ${rarError.message}`);
+                console.error(`Eroare RAR: ${rarError.message}`);
                 return null;
             }
         }
         // Text direct
         else {
-            console.log('📄 Fișier text direct (SRT/SUB)');
+            console.log('Fisier text direct');
             return decodeRomanianText(buffer);
         }
     } catch (error) {
-        console.error(`❌ Eroare descărcare: ${error.message}`);
+        console.error(`Eroare descarcare: ${error.message}`);
         return null;
     }
 }
 
-// Funcție pentru căutare pe titrari.ro
+// Functie pentru cautare pe titrari.ro
 async function searchByImdbId(imdbId, type, season, episode) {
     const cacheKey = `search:${imdbId}:${season || 'x'}:${episode || 'x'}`;
     
@@ -276,7 +269,7 @@ async function searchByImdbId(imdbId, type, season, episode) {
         const cleanImdbId = imdbId.replace('tt', '');
         const searchUrl = `https://titrari.ro/index.php?page=numaicautamcaneiesepenas&z7=&z2=&z5=${cleanImdbId}&z3=-1&z4=-1&z8=1&z9=All&z11=0&z6=0`;
         
-        console.log(`🔍 Caut pe titrari.ro: ${imdbId}${season ? ` (S${season}E${episode})` : ''}`);
+        console.log(`Caut pe titrari.ro: ${imdbId}${season ? ` (S${season}E${episode})` : ''}`);
         
         const response = await axios.get(searchUrl, {
             headers: COMMON_HEADERS,
@@ -302,9 +295,9 @@ async function searchByImdbId(imdbId, type, season, episode) {
             }
         });
         
-        console.log(`📋 Găsite ${downloadLinks.length} link-uri de download`);
+        console.log(`Gasite ${downloadLinks.length} link-uri de download`);
         
-        // Procesăm fiecare link
+        // Procesam fiecare link
         for (const item of downloadLinks) {
             const { elem: $elem, link: downloadLink, subId } = item;
             const $row = $elem.closest('tr');
@@ -323,7 +316,7 @@ async function searchByImdbId(imdbId, type, season, episode) {
                 if (h1Text) title = h1Text;
             }
             
-            // Pentru seriale, verificăm sezonul/episodul
+            // Pentru seriale, verificam sezonul/episodul
             if (type === 'series' && season && episode) {
                 const textToCheck = title + ' ' + allText;
                 
@@ -374,9 +367,9 @@ async function searchByImdbId(imdbId, type, season, episode) {
             });
         }
         
-        console.log(`✅ Returnez ${subtitles.length} subtitrări`);
+        console.log(`Returnez ${subtitles.length} subtitrari`);
         
-        // Sortăm după număr de descărcări
+        // Sortam dupa numar de descarcari
         subtitles.sort((a, b) => b.downloads - a.downloads);
         
         // Cache rezultatele
@@ -388,16 +381,16 @@ async function searchByImdbId(imdbId, type, season, episode) {
         return subtitles;
         
     } catch (error) {
-        console.error(`❌ Eroare căutare: ${error.message}`);
+        console.error(`Eroare cautare: ${error.message}`);
         return [];
     }
 }
 
-// Handler pentru subtitrări
+// Handler pentru subtitrari
 builder.defineSubtitlesHandler(async (args) => {
     const { type, id } = args;
     
-    console.log(`📺 Cerere subtitrări: type=${type}, id=${id}`);
+    console.log(`Cerere subtitrari: type=${type}, id=${id}`);
     
     try {
         const parts = id.split(':');
@@ -409,21 +402,21 @@ builder.defineSubtitlesHandler(async (args) => {
         
         return Promise.resolve({ subtitles });
     } catch (error) {
-        console.error('❌ Eroare handler subtitrări:', error);
+        console.error('Eroare handler subtitrari:', error);
         return Promise.resolve({ subtitles: [] });
     }
 });
 
-// Pornește serverul
+// Porneste serverul
 const PORT = process.env.PORT || 7000;
 
 serveHTTP(builder.getInterface(), {
     port: PORT,
     cacheMaxAge: 60 * 60
 }).then(() => {
-    console.log(`✅ Server pornit pe portul ${PORT}`);
-    console.log(`🌐 Manifest: http://localhost:${PORT}/manifest.json`);
+    console.log(`Server pornit pe portul ${PORT}`);
+    console.log(`Manifest: http://localhost:${PORT}/manifest.json`);
 }).catch(error => {
-    console.error('❌ Eroare pornire server:', error);
+    console.error('Eroare pornire server:', error);
     process.exit(1);
 });
