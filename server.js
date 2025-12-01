@@ -395,13 +395,48 @@ const server = http.createServer(async (req, res) => {
         return;
     }
     
-    // Pentru /manifest.json și alte rute Stremio, folosim interfața direct
+    // Pentru /manifest.json, returnăm manifestul direct
     if (parsedUrl.pathname === '/manifest.json') {
         res.writeHead(200, { 
             'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*'
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type'
         });
         res.end(JSON.stringify(addonInterface.manifest));
+        return;
+    }
+    
+    // Pentru cereri de subtitrări de la Stremio
+    if (parsedUrl.pathname.startsWith('/subtitles/')) {
+        console.log('🎬 Cerere subtitrări Stremio:', parsedUrl.pathname);
+        
+        // Extragem parametrii din URL
+        // Format: /subtitles/movie/tt1375666/...json
+        const pathParts = parsedUrl.pathname.split('/');
+        const type = pathParts[2]; // movie sau series
+        const id = pathParts[3]; // tt1375666 sau tt1375666:1:1
+        
+        console.log('📝 Type:', type, 'ID:', id);
+        
+        try {
+            const result = await addonInterface.get({ 
+                resource: 'subtitles',
+                type: type,
+                id: id
+            });
+            
+            res.writeHead(200, { 
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            });
+            res.end(JSON.stringify(result));
+            console.log('✅ Răspuns trimis:', result.subtitles?.length || 0, 'subtitrări');
+        } catch (error) {
+            console.error('❌ Eroare procesare cerere Stremio:', error);
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ subtitles: [] }));
+        }
         return;
     }
     
@@ -458,12 +493,29 @@ const server = http.createServer(async (req, res) => {
         return;
     }
     
-    // Pentru alte cereri Stremio (subtitles handler)
-    // Lăsăm SDK-ul să le proceseze
+    // Pentru favicon - ignorăm
+    if (parsedUrl.pathname === '/favicon.ico') {
+        res.writeHead(204);
+        res.end();
+        return;
+    }
+    
+    // Pentru OPTIONS (CORS preflight)
+    if (req.method === 'OPTIONS') {
+        res.writeHead(200, {
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type'
+        });
+        res.end();
+        return;
+    }
+    
+    // Pentru alte rute necunoscute
+    console.log('⚠️ Rută necunoscută:', parsedUrl.pathname);
+    res.writeHead(404, { 'Content-Type': 'text/plain' });
+    res.end('Not Found');
 });
-
-// Montăm Stremio addon pe server
-serveHTTP(addonInterface, { server });
 
 // Pornim serverul
 const port = process.env.PORT || 7000;
