@@ -53,47 +53,88 @@ function extractSubtitleId(href) {
     return match ? match[1] : null;
 }
 
-// Funcție pentru a extrage SRT din ZIP
-async function extractSrtFromZip(zipUrl, subId) {
+// Funcție pentru a extrage/descărca subtitrare (ZIP sau direct SRT/SUB)
+async function extractSrtFromZip(downloadUrl, subId) {
     try {
-        console.log(`📥 Descarc ZIP: ${zipUrl}`);
+        console.log(`📥 Descarc subtitrare: ${downloadUrl}`);
         
-        const response = await axios.get(zipUrl, {
+        const response = await axios.get(downloadUrl, {
             headers: COMMON_HEADERS,
             responseType: 'arraybuffer',
             timeout: 30000
         });
         
-        console.log(`✅ ZIP descărcat: ${response.data.length} bytes`);
+        console.log(`✅ Fișier descărcat: ${response.data.length} bytes`);
         
-        const zip = new AdmZip(response.data);
-        const zipEntries = zip.getEntries();
+        // Verificăm Content-Type
+        const contentType = response.headers['content-type'] || '';
+        console.log(`📄 Content-Type: ${contentType}`);
         
-        console.log(`📦 Fișiere în ZIP: ${zipEntries.length}`);
+        // Verificăm dacă e ZIP sau text direct
+        const buffer = Buffer.from(response.data);
         
-        for (const entry of zipEntries) {
-            const fileName = entry.entryName.toLowerCase();
-            console.log(`   - ${entry.entryName}`);
+        // ZIP-urile încep cu signature PK (0x50 0x4B)
+        const isZip = buffer[0] === 0x50 && buffer[1] === 0x4B;
+        
+        if (isZip) {
+            console.log('📦 Fișier ZIP detectat - extrag conținutul...');
             
-            if (fileName.endsWith('.srt') || fileName.endsWith('.sub')) {
-                console.log(`✅ Găsit subtitrare: ${entry.entryName}`);
-                const content = entry.getData();
+            try {
+                const zip = new AdmZip(buffer);
+                const zipEntries = zip.getEntries();
                 
-                let textContent = content.toString('utf8');
+                console.log(`📦 Fișiere în ZIP: ${zipEntries.length}`);
                 
-                if (textContent.includes('�')) {
-                    textContent = content.toString('latin1');
+                for (const entry of zipEntries) {
+                    const fileName = entry.entryName.toLowerCase();
+                    console.log(`   - ${entry.entryName}`);
+                    
+                    if (fileName.endsWith('.srt') || fileName.endsWith('.sub')) {
+                        console.log(`✅ Găsit subtitrare: ${entry.entryName}`);
+                        const content = entry.getData();
+                        
+                        let textContent = content.toString('utf8');
+                        
+                        if (textContent.includes('�')) {
+                            textContent = content.toString('latin1');
+                        }
+                        
+                        return textContent;
+                    }
                 }
                 
+                console.log('⚠️ Nu s-a găsit fișier SRT în ZIP');
+                return null;
+                
+            } catch (zipError) {
+                console.error(`❌ Eroare extragere ZIP: ${zipError.message}`);
+                return null;
+            }
+        } else {
+            // Nu e ZIP - e direct SRT/SUB
+            console.log('📄 Fișier text direct (SRT/SUB) - nu e ZIP');
+            
+            let textContent = buffer.toString('utf8');
+            
+            // Verificăm dacă e valid UTF-8 sau trebuie alt encoding
+            if (textContent.includes('�') || textContent.includes('\ufffd')) {
+                console.log('🔄 Encoding UTF-8 invalid, încerc Latin1/CP1250...');
+                textContent = buffer.toString('latin1');
+            }
+            
+            // Verificăm dacă arată ca un SRT valid (conține număr la început)
+            if (/^\d+\s*\n/.test(textContent) || textContent.includes('-->')) {
+                console.log(`✅ Subtitrare validă (${textContent.length} caractere)`);
                 return textContent;
+            } else {
+                console.log('⚠️ Conținutul nu arată ca o subtitrare validă');
+                console.log('Primele 200 caractere:', textContent.substring(0, 200));
+                return textContent; // Returnăm oricum, poate e valid
             }
         }
         
-        console.log('⚠️ Nu s-a găsit fișier SRT în ZIP');
-        return null;
-        
     } catch (error) {
-        console.error(`❌ Eroare extragere SRT: ${error.message}`);
+        console.error(`❌ Eroare descărcare subtitrare: ${error.message}`);
         return null;
     }
 }
