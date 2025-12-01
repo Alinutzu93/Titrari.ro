@@ -325,6 +325,9 @@ builder.defineSubtitlesHandler(async (args) => {
     }
 });
 
+// Creăm interfața addon-ului ÎNAINTE de server
+const addonInterface = builder.getInterface();
+
 // Creăm server HTTP custom
 const server = http.createServer(async (req, res) => {
     const parsedUrl = url.parse(req.url, true);
@@ -332,7 +335,7 @@ const server = http.createServer(async (req, res) => {
     console.log(`📍 Request: ${req.method} ${req.url}`);
     
     // Health check simplu pentru root
-    if (parsedUrl.pathname === '/' || parsedUrl.pathname === '/health') {
+    if (parsedUrl.pathname === '/health') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ 
             status: 'ok', 
@@ -392,12 +395,75 @@ const server = http.createServer(async (req, res) => {
         return;
     }
     
-    // Pentru alte cereri, lăsăm Stremio SDK să le gestioneze
-    // SDK-ul va răspunde automat pentru /manifest.json și alte rute
+    // Pentru /manifest.json și alte rute Stremio, folosim interfața direct
+    if (parsedUrl.pathname === '/manifest.json') {
+        res.writeHead(200, { 
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*'
+        });
+        res.end(JSON.stringify(addonInterface.manifest));
+        return;
+    }
+    
+    // Pentru ruta root, arătăm info despre addon
+    if (parsedUrl.pathname === '/') {
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end(`
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="utf-8">
+                <title>Titrari.ro Stremio Addon</title>
+                <style>
+                    body { font-family: Arial; max-width: 600px; margin: 50px auto; padding: 20px; }
+                    h1 { color: #8A2BE2; }
+                    .install-btn { 
+                        background: #8A2BE2; 
+                        color: white; 
+                        padding: 15px 30px; 
+                        border: none; 
+                        border-radius: 5px; 
+                        font-size: 16px;
+                        cursor: pointer;
+                        text-decoration: none;
+                        display: inline-block;
+                    }
+                    .install-btn:hover { background: #7B1FA2; }
+                    code { background: #f4f4f4; padding: 2px 6px; border-radius: 3px; }
+                </style>
+            </head>
+            <body>
+                <h1>🇷🇴 Titrari.ro - Stremio Addon</h1>
+                <p>Addon pentru subtitrări românești de pe <strong>titrari.ro</strong></p>
+                <p><strong>Versiune:</strong> ${manifest.version}</p>
+                
+                <h2>📦 Instalare:</h2>
+                <p>Click pe butonul de mai jos pentru a instala addon-ul în Stremio:</p>
+                <a href="stremio://${req.headers.host}/manifest.json" class="install-btn">
+                    Instalează în Stremio
+                </a>
+                
+                <h2>🔗 Link-uri utile:</h2>
+                <ul>
+                    <li><a href="/manifest.json">Manifest JSON</a></li>
+                    <li><a href="/health">Health Check</a></li>
+                </ul>
+                
+                <h2>📝 Instalare manuală:</h2>
+                <p>Copiază acest URL în Stremio:</p>
+                <code>https://${req.headers.host}/manifest.json</code>
+            </body>
+            </html>
+        `);
+        return;
+    }
+    
+    // Pentru alte cereri Stremio (subtitles handler)
+    // Lăsăm SDK-ul să le proceseze
 });
 
 // Montăm Stremio addon pe server
-serveHTTP(builder.getInterface(), { server });
+serveHTTP(addonInterface, { server });
 
 // Pornim serverul
 const port = process.env.PORT || 7000;
