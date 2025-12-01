@@ -10,7 +10,7 @@ const url = require('url');
 // Definirea manifestului addon-ului
 const manifest = {
     id: 'ro.titrari.stremio',
-    version: '1.0.5',
+    version: '1.0.6',
     name: 'Titrari.ro',
     description: 'Subtitrări în limba română de pe titrari.ro - cel mai mare site de subtitrări românești',
     resources: ['subtitles'],
@@ -20,7 +20,7 @@ const manifest = {
     logo: 'https://titrari.ro/images/logo.png'
 };
 
-console.log('🚀 Titrari.ro Addon v1.0.5 - Series Archive Support ENABLED');
+console.log('🚀🚀🚀 Titrari.ro Addon v1.0.6 LOADED - ARCHIVE EPISODE DETECTION 🚀🚀🚀');
 
 const builder = new addonBuilder(manifest);
 
@@ -782,17 +782,16 @@ const server = http.createServer(async (req, res) => {
 const port = process.env.PORT || 7000;
 
 server.listen(port, '0.0.0.0', () => {
-    console.log('\n' + '🚀'.repeat(30));
-    console.log('✅ Addon Titrari.ro v1.0.5 PORNIT!');
-    console.log('🎬 SERIES ARCHIVE SUPPORT: ENABLED');
+    console.log('\n' + '=' +'🎬'.repeat(28) + '=');
+    console.log('✅ Addon Titrari.ro v1.0.6 PORNIT! ✅');
+    console.log('🎯 ARCHIVE EPISODE DETECTION: ENABLED 🎯');
     console.log(`🔌 Port: ${port}`);
-    console.log(`🌐 Manifest Local: http://localhost:${port}/manifest.json`);
-    console.log(`🌐 Health Check: http://localhost:${port}/health`);
-    console.log(`📝 Environment: ${process.env.NODE_ENV || 'development'}`);
+    console.log(`🌐 Manifest: http://localhost:${port}/manifest.json`);
+    console.log(`🏥 Health: http://localhost:${port}/health`);
     if (process.env.RENDER_EXTERNAL_URL) {
-        console.log(`🌍 Public URL: ${process.env.RENDER_EXTERNAL_URL}/manifest.json`);
+        console.log(`🌍 Public: ${process.env.RENDER_EXTERNAL_URL}`);
     }
-    console.log('🚀'.repeat(30) + '\n');
+    console.log('=' + '🎬'.repeat(28) + '=\n');
 }).on('error', (err) => {
     console.error('❌ Eroare la pornirea serverului:', err);
     process.exit(1);
