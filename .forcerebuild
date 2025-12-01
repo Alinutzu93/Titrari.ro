@@ -1,0 +1,4 @@
+echo "v1.0.6" > .forcerebuild
+git add .forcerebuild
+git commit -m "Force rebuild v1.0.6"
+git push
