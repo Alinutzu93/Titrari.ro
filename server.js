@@ -3,6 +3,8 @@ const { addonBuilder, serveHTTP } = require('stremio-addon-sdk');
 const axios = require('axios');
 const cheerio = require('cheerio');
 const AdmZip = require('adm-zip');
+const http = require('http');
+const url = require('url');
 
 // Definirea manifestului addon-ului
 const manifest = {
@@ -141,6 +143,10 @@ async function searchByImdbId(imdbId, type, season, episode) {
         
         console.log(`📋 Găsite ${downloadLinks.length} link-uri de download`);
         
+        // Obținem base URL-ul serverului
+        const port = process.env.PORT || 7000;
+        const baseUrl = process.env.RENDER_EXTERNAL_URL || `http://localhost:${port}`;
+        
         for (const item of downloadLinks) {
             const { elem: $elem, link: downloadLink, subId } = item;
             
@@ -232,11 +238,6 @@ async function searchByImdbId(imdbId, type, season, episode) {
                 displayTitle += ` ↓${downloads}`;
             }
             
-            // Obținem URL-ul public al serverului
-            const baseUrl = process.env.RENDER_EXTERNAL_URL || 
-                           `https://${process.env.RENDER_SERVICE_NAME || 'stremio-titrari-ro'}.onrender.com` ||
-                           `http://localhost:${process.env.PORT || 7000}`;
-            
             const proxyUrl = `${baseUrl}/subtitle/${subId}.srt`;
             
             subtitles.push({
@@ -325,11 +326,22 @@ builder.defineSubtitlesHandler(async (args) => {
 });
 
 // Creăm server HTTP custom
-const http = require('http');
-const url = require('url');
-
 const server = http.createServer(async (req, res) => {
     const parsedUrl = url.parse(req.url, true);
+    
+    console.log(`📍 Request: ${req.method} ${req.url}`);
+    
+    // Health check simplu pentru root
+    if (parsedUrl.pathname === '/' || parsedUrl.pathname === '/health') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ 
+            status: 'ok', 
+            addon: 'Titrari.ro',
+            version: '1.0.3',
+            timestamp: new Date().toISOString()
+        }));
+        return;
+    }
     
     // Endpoint pentru descărcare subtitrări
     if (parsedUrl.pathname.startsWith('/subtitle/')) {
@@ -381,12 +393,13 @@ const server = http.createServer(async (req, res) => {
     }
     
     // Pentru alte cereri, lăsăm Stremio SDK să le gestioneze
+    // SDK-ul va răspunde automat pentru /manifest.json și alte rute
 });
 
 // Montăm Stremio addon pe server
 serveHTTP(builder.getInterface(), { server });
 
-// IMPORTANT: Pornim serverul efectiv pe port
+// Pornim serverul
 const port = process.env.PORT || 7000;
 
 server.listen(port, '0.0.0.0', () => {
@@ -394,9 +407,13 @@ server.listen(port, '0.0.0.0', () => {
     console.log('✅ Addon Titrari.ro v1.0.3 PORNIT!');
     console.log(`🔌 Port: ${port}`);
     console.log(`🌐 Manifest Local: http://localhost:${port}/manifest.json`);
-    console.log(`🌐 Health Check: http://localhost:${port}/manifest.json`);
+    console.log(`🌐 Health Check: http://localhost:${port}/health`);
+    console.log(`📝 Environment: ${process.env.NODE_ENV || 'development'}`);
     if (process.env.RENDER_EXTERNAL_URL) {
         console.log(`🌍 Public URL: ${process.env.RENDER_EXTERNAL_URL}/manifest.json`);
     }
     console.log('🚀'.repeat(30) + '\n');
+}).on('error', (err) => {
+    console.error('❌ Eroare la pornirea serverului:', err);
+    process.exit(1);
 });
