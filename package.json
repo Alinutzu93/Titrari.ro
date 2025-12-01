@@ -1,5 +1,36 @@
 {
   "name": "stremio-titrari-ro",
+  "version": "1.0.6",
+  "description": "Addon Stremio pentru subtitrări românești de pe titrari.ro cu suport complet pentru arhive multi-episod",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "keywords": [
+    "stremio",
+    "addon",
+    "subtitles",
+    "romanian",
+    "titrari"
+  ],
+  "author": "Your Name",
+  "license": "MIT",
+  "dependencies": {
+    "stremio-addon-sdk": "^1.6.10",
+    "axios": "^1.6.0",
+    "cheerio": "^1.0.0-rc.12",
+    "adm-zip": "^0.5.10",
+    "node-unrar-js": "^2.0.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.0"
+  },
+  "engines": {
+    "node": "20.x"
+  }
+}{
+  "name": "stremio-titrari-ro",
   "version": "1.0.5",
   "description": "Addon Stremio pentru subtitrări românești de pe titrari.ro - cel mai mare site de subtitrări din România",
   "main": "server.js",
