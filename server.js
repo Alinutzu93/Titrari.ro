@@ -31,6 +31,9 @@ const COMMON_HEADERS = {
     'Referer': 'https://titrari.ro/'
 };
 
+// Cache pentru URL-urile originale ale subtitrărilor
+const subtitleUrlCache = new Map();
+
 // Funcție pentru normalizare text
 function normalize(text) {
     return text
@@ -48,15 +51,11 @@ function extractSubtitleId(href) {
     return match ? match[1] : null;
 }
 
-// Cache pentru URL-urile originale ale subtitrărilor
-const subtitleUrlCache = new Map();
-
 // Funcție pentru a extrage SRT din ZIP
 async function extractSrtFromZip(zipUrl, subId) {
     try {
         console.log(`📥 Descarc ZIP: ${zipUrl}`);
         
-        // Descărcăm ZIP-ul
         const response = await axios.get(zipUrl, {
             headers: COMMON_HEADERS,
             responseType: 'arraybuffer',
@@ -65,13 +64,11 @@ async function extractSrtFromZip(zipUrl, subId) {
         
         console.log(`✅ ZIP descărcat: ${response.data.length} bytes`);
         
-        // Extragem conținutul ZIP-ului
         const zip = new AdmZip(response.data);
         const zipEntries = zip.getEntries();
         
         console.log(`📦 Fișiere în ZIP: ${zipEntries.length}`);
         
-        // Căutăm fișierul SRT/SUB
         for (const entry of zipEntries) {
             const fileName = entry.entryName.toLowerCase();
             console.log(`   - ${entry.entryName}`);
@@ -80,10 +77,8 @@ async function extractSrtFromZip(zipUrl, subId) {
                 console.log(`✅ Găsit subtitrare: ${entry.entryName}`);
                 const content = entry.getData();
                 
-                // Convertim la UTF-8 dacă e necesar
                 let textContent = content.toString('utf8');
                 
-                // Dacă conține caractere ciudate, încearcă alte encodings
                 if (textContent.includes('�')) {
                     textContent = content.toString('latin1');
                 }
@@ -114,10 +109,6 @@ async function searchByImdbId(imdbId, type, season, episode) {
     }
     
     try {
-        // Titrari.ro folosește "numaicautamcaneiesepenas" (Căutare avansată) pentru IMDB ID
-        // z5 = IMDB ID (fără "tt")
-        // z8=1 = limba română
-        // z11=0 = toate tipurile (filme + seriale)
         const cleanImdbId = imdbId.replace('tt', '');
         const searchUrl = `https://titrari.ro/index.php?page=numaicautamcaneiesepenas&z7=&z2=&z5=${cleanImdbId}&z3=-1&z4=-1&z8=1&z9=All&z11=0&z6=0`;
         
@@ -133,7 +124,6 @@ async function searchByImdbId(imdbId, type, season, episode) {
         const $ = cheerio.load(response.data);
         const subtitles = [];
         
-        // Parcurgem toate link-urile de download
         const downloadLinks = [];
         $('a[href*="get.php?id="]').each((i, elem) => {
             const $elem = $(elem);
@@ -151,15 +141,12 @@ async function searchByImdbId(imdbId, type, season, episode) {
         
         console.log(`📋 Găsite ${downloadLinks.length} link-uri de download`);
         
-        // Procesăm fiecare link
         for (const item of downloadLinks) {
             const { elem: $elem, link: downloadLink, subId } = item;
             
-            // Găsim rândul părinte (tr) care conține toate detaliile
             const $row = $elem.closest('tr');
             const allText = $row.text();
             
-            // Extragem titlul filmului/serialului
             let title = '';
             $row.find('h1 a, .row1 a[style*="color:black"]').each((j, titleElem) => {
                 const text = $(titleElem).text().trim();
@@ -173,7 +160,6 @@ async function searchByImdbId(imdbId, type, season, episode) {
                 if (h1Text) title = h1Text;
             }
             
-            // Extragem detalii
             let fps = '';
             let translator = '';
             let downloads = '0';
@@ -199,7 +185,6 @@ async function searchByImdbId(imdbId, type, season, episode) {
                 releaseInfo = commentMatch[1].trim().substring(0, 80);
             }
             
-            // Pentru seriale, verificăm dacă este episodul corect
             if (type === 'series' && season && episode) {
                 const textToCheck = title + ' ' + releaseInfo + ' ' + allText;
                 
@@ -212,22 +197,19 @@ async function searchByImdbId(imdbId, type, season, episode) {
                 const matches = patterns.some(p => p.test(textToCheck));
                 
                 if (!matches) {
-                    console.log(`⏭️  Skip: ${title} - nu este S${season}E${episode}`);
+                    console.log(`⏭️ Skip: ${title} - nu este S${season}E${episode}`);
                     continue;
                 }
             }
             
-            // Construim URL-ul complet
             const fullUrl = downloadLink.startsWith('http') 
                 ? downloadLink 
                 : `https://titrari.ro/${downloadLink}`;
             
-            // Folosim direct URL-ul (get.php returnează fișierul direct)
             const directUrl = fullUrl;
             
             console.log(`🔗 URL subtitrare: ${directUrl}`);
             
-            // Construim titlul descriptiv
             let displayTitle = '🇷🇴 Titrari.ro';
             
             if (title) {
@@ -250,29 +232,31 @@ async function searchByImdbId(imdbId, type, season, episode) {
                 displayTitle += ` ↓${downloads}`;
             }
             
-            // Cream URL proxy prin serverul nostru pentru a extrage SRT din ZIP
-            const proxyUrl = `${process.env.PROXY_URL || 'http://localhost:7000'}/subtitle/${subId}.srt`;
+            // Obținem URL-ul public al serverului
+            const baseUrl = process.env.RENDER_EXTERNAL_URL || 
+                           `https://${process.env.RENDER_SERVICE_NAME || 'stremio-titrari-ro'}.onrender.com` ||
+                           `http://localhost:${process.env.PORT || 7000}`;
+            
+            const proxyUrl = `${baseUrl}/subtitle/${subId}.srt`;
             
             subtitles.push({
                 id: `titrari:${subId}`,
-                url: proxyUrl, // URL-ul proxy care va extrage SRT-ul
+                url: proxyUrl,
                 lang: 'ron',
                 title: displayTitle,
                 downloads: parseInt(downloads) || 0,
-                _originalUrl: directUrl // Păstrăm URL-ul original pentru proxy
+                _originalUrl: directUrl
             });
             
             console.log(`✅ ${displayTitle}`);
         }
         
-        // Sortăm după popularitate
         subtitles.sort((a, b) => b.downloads - a.downloads);
         
-        // Salvăm URL-urile originale în cache pentru endpoint-ul proxy
         subtitles.forEach(sub => {
             if (sub._originalUrl) {
                 subtitleUrlCache.set(sub.id.split(':')[1], sub._originalUrl);
-                delete sub._originalUrl; // Ștergem din obiectul returnat
+                delete sub._originalUrl;
             }
         });
         
@@ -313,8 +297,8 @@ async function searchSubtitles(imdbId, type, season, episode) {
 // Handler pentru cereri de subtitrări
 builder.defineSubtitlesHandler(async (args) => {
     console.log('\n' + '🔥'.repeat(30));
-    console.log('📥 CERERE STREMIO');
-    console.log('📥 Args:', JSON.stringify(args, null, 2));
+    console.log('🔥 CERERE STREMIO');
+    console.log('🔥 Args:', JSON.stringify(args, null, 2));
     
     const { type, id } = args;
     
@@ -340,10 +324,7 @@ builder.defineSubtitlesHandler(async (args) => {
     }
 });
 
-// Pornește serverul
-const port = process.env.PORT || 7000;
-
-// Cream server HTTP custom pentru a adăuga endpoint-ul /subtitle
+// Creăm server HTTP custom
 const http = require('http');
 const url = require('url');
 
@@ -399,17 +380,23 @@ const server = http.createServer(async (req, res) => {
         return;
     }
     
-    // Pentru alte cereri, nu facem nimic (le va gestiona Stremio SDK)
+    // Pentru alte cereri, lăsăm Stremio SDK să le gestioneze
 });
 
-// Montăm Stremio addon pe server-ul nostru
-serveHTTP(builder.getInterface(), { 
-    server: server
-});
+// Montăm Stremio addon pe server
+serveHTTP(builder.getInterface(), { server });
 
-console.log('\n' + '🚀'.repeat(30));
-console.log('✅ Addon Titrari.ro v1.0.3 PORNIT!');
-console.log(`📍 Port: ${port}`);
-console.log(`🌐 Manifest Local: http://localhost:${port}/manifest.json`);
-console.log(`🌐 Pentru Render.com: https://YOUR-APP.onrender.com/manifest.json`);
-console.log('🚀'.repeat(30) + '\n');
+// IMPORTANT: Pornim serverul efectiv pe port
+const port = process.env.PORT || 7000;
+
+server.listen(port, '0.0.0.0', () => {
+    console.log('\n' + '🚀'.repeat(30));
+    console.log('✅ Addon Titrari.ro v1.0.3 PORNIT!');
+    console.log(`🔌 Port: ${port}`);
+    console.log(`🌐 Manifest Local: http://localhost:${port}/manifest.json`);
+    console.log(`🌐 Health Check: http://localhost:${port}/manifest.json`);
+    if (process.env.RENDER_EXTERNAL_URL) {
+        console.log(`🌍 Public URL: ${process.env.RENDER_EXTERNAL_URL}/manifest.json`);
+    }
+    console.log('🚀'.repeat(30) + '\n');
+});
