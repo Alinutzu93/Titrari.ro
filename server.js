@@ -352,19 +352,47 @@ async function searchByImdbId(imdbId, type, season, episode) {
             const downloadsMatch = allText.match(/Descarcari[:\s]*(\d+)/i);
             if (downloadsMatch) downloads = downloadsMatch[1];
             
-            // Cream URL-ul complet de download
-            const fullDownloadUrl = downloadLink.startsWith('http') 
-                ? downloadLink 
-                : `https://titrari.ro/${downloadLink}`;
-            
-            subtitles.push({
-                id: `titrari:${subId}`,
-                lang: 'ro',
-                url: fullDownloadUrl,
-                title: title || `Titrari.ro - ${imdbId}`,
-                fps: fps || 'Auto',
-                downloads: parseInt(downloads) || 0
-            });
+            // Pentru seriale, verificam daca arhiva contine episodul
+            if (type === 'series' && season && episode) {
+                const fullDownloadUrl = downloadLink.startsWith('http') 
+                    ? downloadLink 
+                    : `https://titrari.ro/${downloadLink}`;
+                
+                console.log(`Verific daca arhiva contine S${season}E${episode}...`);
+                
+                // Descarcam si verificam arhiva
+                const srtContent = await extractSrtFromArchive(fullDownloadUrl, subId, season, episode);
+                
+                if (srtContent) {
+                    // Cream un URL special care va returna subtitrarea extrasa
+                    // Stremio va face request la acest URL
+                    subtitles.push({
+                        id: `titrari:${subId}:${season}:${episode}`,
+                        lang: 'ro',
+                        url: fullDownloadUrl,
+                        title: title || `Titrari.ro - ${imdbId}`,
+                        fps: fps || 'Auto',
+                        downloads: parseInt(downloads) || 0
+                    });
+                    console.log(`Episodul S${season}E${episode} gasit in arhiva!`);
+                } else {
+                    console.log(`Episodul S${season}E${episode} NU este in arhiva`);
+                }
+            } else {
+                // Pentru filme, adaugam direct
+                const fullDownloadUrl = downloadLink.startsWith('http') 
+                    ? downloadLink 
+                    : `https://titrari.ro/${downloadLink}`;
+                
+                subtitles.push({
+                    id: `titrari:${subId}`,
+                    lang: 'ro',
+                    url: fullDownloadUrl,
+                    title: title || `Titrari.ro - ${imdbId}`,
+                    fps: fps || 'Auto',
+                    downloads: parseInt(downloads) || 0
+                });
+            }
         }
         
         console.log(`Returnez ${subtitles.length} subtitrari`);
