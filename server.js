@@ -3,6 +3,7 @@ const { addonBuilder, serveHTTP } = require('stremio-addon-sdk');
 const axios = require('axios');
 const cheerio = require('cheerio');
 const AdmZip = require('adm-zip');
+const { createExtractorFromData } = require('node-unrar-js');
 const http = require('http');
 const url = require('url');
 
@@ -53,7 +54,7 @@ function extractSubtitleId(href) {
     return match ? match[1] : null;
 }
 
-// Funcție pentru a extrage/descărca subtitrare (ZIP sau direct SRT/SUB)
+// Funcție pentru a extrage/descărca subtitrare (ZIP, RAR sau direct SRT/SUB)
 async function extractSrtFromZip(downloadUrl, subId) {
     try {
         console.log(`📥 Descarc subtitrare: ${downloadUrl}`);
@@ -66,16 +67,16 @@ async function extractSrtFromZip(downloadUrl, subId) {
         
         console.log(`✅ Fișier descărcat: ${response.data.length} bytes`);
         
-        // Verificăm Content-Type
         const contentType = response.headers['content-type'] || '';
         console.log(`📄 Content-Type: ${contentType}`);
         
-        // Verificăm dacă e ZIP sau text direct
         const buffer = Buffer.from(response.data);
         
-        // ZIP-urile încep cu signature PK (0x50 0x4B)
-        const isZip = buffer[0] === 0x50 && buffer[1] === 0x4B;
+        // Detectăm tipul de fișier după signature
+        const isZip = buffer[0] === 0x50 && buffer[1] === 0x4B; // PK
+        const isRar = buffer[0] === 0x52 && buffer[1] === 0x61 && buffer[2] === 0x72; // Rar!
         
+        // ZIP
         if (isZip) {
             console.log('📦 Fișier ZIP detectat - extrag conținutul...');
             
@@ -110,26 +111,67 @@ async function extractSrtFromZip(downloadUrl, subId) {
                 console.error(`❌ Eroare extragere ZIP: ${zipError.message}`);
                 return null;
             }
-        } else {
-            // Nu e ZIP - e direct SRT/SUB
-            console.log('📄 Fișier text direct (SRT/SUB) - nu e ZIP');
+        } 
+        // RAR
+        else if (isRar) {
+            console.log('📦 Fișier RAR detectat - extrag conținutul...');
+            
+            try {
+                const extractor = await createExtractorFromData({ data: buffer });
+                const list = extractor.getFileList();
+                const fileHeaders = [...list.fileHeaders];
+                
+                console.log(`📦 Fișiere în RAR: ${fileHeaders.length}`);
+                
+                for (const fileHeader of fileHeaders) {
+                    const fileName = fileHeader.name.toLowerCase();
+                    console.log(`   - ${fileHeader.name}`);
+                    
+                    if (fileName.endsWith('.srt') || fileName.endsWith('.sub')) {
+                        console.log(`✅ Găsit subtitrare: ${fileHeader.name}`);
+                        
+                        const extracted = extractor.extract({ files: [fileHeader.name] });
+                        const files = [...extracted.files];
+                        
+                        if (files.length > 0 && files[0].extraction) {
+                            const content = files[0].extraction;
+                            let textContent = Buffer.from(content).toString('utf8');
+                            
+                            if (textContent.includes('�')) {
+                                textContent = Buffer.from(content).toString('latin1');
+                            }
+                            
+                            return textContent;
+                        }
+                    }
+                }
+                
+                console.log('⚠️ Nu s-a găsit fișier SRT în RAR');
+                return null;
+                
+            } catch (rarError) {
+                console.error(`❌ Eroare extragere RAR: ${rarError.message}`);
+                return null;
+            }
+        } 
+        // Text direct (SRT/SUB)
+        else {
+            console.log('📄 Fișier text direct (SRT/SUB) - nu e arhivă');
             
             let textContent = buffer.toString('utf8');
             
-            // Verificăm dacă e valid UTF-8 sau trebuie alt encoding
             if (textContent.includes('�') || textContent.includes('\ufffd')) {
                 console.log('🔄 Encoding UTF-8 invalid, încerc Latin1/CP1250...');
                 textContent = buffer.toString('latin1');
             }
             
-            // Verificăm dacă arată ca un SRT valid (conține număr la început)
             if (/^\d+\s*\n/.test(textContent) || textContent.includes('-->')) {
                 console.log(`✅ Subtitrare validă (${textContent.length} caractere)`);
                 return textContent;
             } else {
                 console.log('⚠️ Conținutul nu arată ca o subtitrare validă');
                 console.log('Primele 200 caractere:', textContent.substring(0, 200));
-                return textContent; // Returnăm oricum, poate e valid
+                return textContent;
             }
         }
         
