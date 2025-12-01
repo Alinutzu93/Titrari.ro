@@ -504,14 +504,12 @@ async function searchByImdbId(imdbId, type, season, episode) {
 // Funcție principală de căutare subtitrări
 async function searchSubtitles(imdbId, type, season, episode) {
     try {
-        // IMPORTANT: Extragem doar IMDB ID-ul de bază (fără :season:episode)
-        const baseImdbId = imdbId.split(':')[0];
-        
+        // imdbId vine deja curat (fără :season:episode) din handler-ul HTTP
         console.log(`\n${'='.repeat(60)}`);
-        console.log(`🎯 Cerere: ${type} - ${baseImdbId}${season ? ` S${season}E${episode}` : ''}`);
+        console.log(`🎯 Cerere: ${type} - ${imdbId}${season ? ` S${season}E${episode}` : ''}`);
         console.log(`⏰ ${new Date().toISOString()}`);
         
-        const subtitles = await searchByImdbId(baseImdbId, type, season, episode);
+        const subtitles = await searchByImdbId(imdbId, type, season, episode);
         
         console.log(`\n📊 Rezultat final: ${subtitles.length} subtitrări`);
         console.log('='.repeat(60));
@@ -650,22 +648,25 @@ const server = http.createServer(async (req, res) => {
         const type = pathParts[2]; // movie sau series
         const idPart = pathParts[3]; // tt1375666 sau tt1375666:1:1 + alte params
         
-        // Extragem doar ID-ul IMDB (fără parametrii extra)
-        const id = idPart.split(/[?&]/)[0]; // ia doar partea până la ? sau &
+        // Extragem doar ID-ul IMDB (fără parametrii extra și fără :season:episode)
+        const fullId = idPart.split(/[?&]/)[0]; // ia doar partea până la ? sau &
         
-        console.log('📝 Type:', type, 'ID:', id);
+        // CRITICAL: Separam IMDB ID de season/episode
+        const idParts = fullId.split(':');
+        const imdbId = idParts[0]; // tt1375666
+        let season = null;
+        let episode = null;
+        
+        if (type === 'series' && idParts.length >= 3) {
+            season = idParts[1];
+            episode = idParts[2];
+        }
+        
+        console.log('📝 Type:', type);
+        console.log('📝 IMDB ID:', imdbId);
+        if (season) console.log('📝 Season:', season, 'Episode:', episode);
         
         try {
-            // Apelăm handler-ul direct
-            const imdbId = id.split(':')[0];
-            let season, episode;
-            
-            if (type === 'series') {
-                const parts = id.split(':');
-                season = parts[1];
-                episode = parts[2];
-            }
-            
             console.log('🔍 Caut subtitrări pentru:', imdbId, season ? `S${season}E${episode}` : '');
             
             const subtitles = await searchSubtitles(imdbId, type, season, episode);
