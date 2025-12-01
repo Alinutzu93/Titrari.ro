@@ -648,8 +648,11 @@ const server = http.createServer(async (req, res) => {
         const type = pathParts[2]; // movie sau series
         const idPart = pathParts[3]; // tt1375666 sau tt1375666:1:1 + alte params
         
+        // IMPORTANT: Decodăm URL-ul (%3A devine :)
+        const decodedIdPart = decodeURIComponent(idPart);
+        
         // Extragem doar ID-ul IMDB (fără parametrii extra și fără :season:episode)
-        const fullId = idPart.split(/[?&]/)[0]; // ia doar partea până la ? sau &
+        const fullId = decodedIdPart.split(/[?&]/)[0]; // ia doar partea până la ? sau &
         
         // CRITICAL: Separam IMDB ID de season/episode
         const idParts = fullId.split(':');
@@ -663,11 +666,12 @@ const server = http.createServer(async (req, res) => {
         }
         
         console.log('📝 Type:', type);
-        console.log('📝 IMDB ID:', imdbId);
+        console.log('📝 Full ID (decoded):', fullId);
+        console.log('📝 IMDB ID (clean):', imdbId);
         if (season) console.log('📝 Season:', season, 'Episode:', episode);
         
         try {
-            console.log('🔍 Caut subtitrări pentru:', imdbId, season ? `S${season}E${episode}` : '');
+            console.log('🔍 Apel searchSubtitles cu:', imdbId, season ? `S${season}E${episode}` : '');
             
             const subtitles = await searchSubtitles(imdbId, type, season, episode);
             
