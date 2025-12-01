@@ -1,6 +1,6 @@
 {
   "name": "stremio-titrari-ro",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Addon Stremio pentru subtitrări românești de pe titrari.ro - cel mai mare site de subtitrări din România",
   "main": "server.js",
   "scripts": {
@@ -20,7 +20,8 @@
     "stremio-addon-sdk": "^1.6.10",
     "axios": "^1.6.0",
     "cheerio": "^1.0.0-rc.12",
-    "adm-zip": "^0.5.10"
+    "adm-zip": "^0.5.10",
+    "node-unrar-js": "^2.0.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.0"
