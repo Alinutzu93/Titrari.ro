@@ -435,15 +435,99 @@ builder.defineSubtitlesHandler(async (args) => {
     }
 });
 
+// Handler pentru subtitrari
+builder.defineSubtitlesHandler(async (args) => {
+    const { type, id } = args;
+    
+    console.log(`Cerere subtitrari: type=${type}, id=${id}`);
+    
+    try {
+        const parts = id.split(':');
+        const imdbId = parts[0];
+        const season = parts[1] ? parseInt(parts[1]) : null;
+        const episode = parts[2] ? parseInt(parts[2]) : null;
+        
+        const subtitles = await searchByImdbId(imdbId, type, season, episode);
+        
+        // Modificam URL-urile pentru a folosi proxy-ul nostru
+        const PORT = process.env.PORT || 7000;
+        const baseUrl = process.env.RENDER_EXTERNAL_URL || `http://localhost:${PORT}`;
+        
+        const modifiedSubtitles = subtitles.map(sub => {
+            const subIdMatch = sub.url.match(/id=(\d+)/);
+            const subId = subIdMatch ? subIdMatch[1] : null;
+            
+            if (subId) {
+                return {
+                    ...sub,
+                    url: `${baseUrl}/subtitle/${subId}/${season || 0}/${episode || 0}.srt`
+                };
+            }
+            return sub;
+        });
+        
+        return Promise.resolve({ subtitles: modifiedSubtitles });
+    } catch (error) {
+        console.error('Eroare handler subtitrari:', error);
+        return Promise.resolve({ subtitles: [] });
+    }
+});
+
 // Porneste serverul
 const PORT = process.env.PORT || 7000;
+const interface = builder.getInterface();
 
-serveHTTP(builder.getInterface(), {
+serveHTTP(interface, {
     port: PORT,
     cacheMaxAge: 60 * 60
-}).then(() => {
+}).then((server) => {
     console.log(`Server pornit pe portul ${PORT}`);
     console.log(`Manifest: http://localhost:${PORT}/manifest.json`);
+    
+    // Adaugam handler custom pentru proxy-ul de subtitrari
+    const originalListeners = server.listeners('request').slice(0);
+    server.removeAllListeners('request');
+    
+    server.on('request', async (req, res) => {
+        const urlParts = req.url.split('/');
+        
+        // Handler pentru subtitrari proxy
+        if (urlParts[1] === 'subtitle') {
+            const subId = urlParts[2];
+            const season = parseInt(urlParts[3]) || null;
+            const episode = parseInt(urlParts[4]?.replace('.srt', '')) || null;
+            
+            console.log(`Proxy request: subId=${subId}, season=${season}, episode=${episode}`);
+            
+            try {
+                const downloadUrl = `https://titrari.ro/get.php?id=${subId}`;
+                const srtContent = await extractSrtFromArchive(downloadUrl, subId, season, episode);
+                
+                if (srtContent) {
+                    res.writeHead(200, {
+                        'Content-Type': 'text/plain; charset=utf-8',
+                        'Access-Control-Allow-Origin': '*',
+                        'Content-Disposition': 'inline'
+                    });
+                    res.end(srtContent);
+                    console.log(`Subtitrare servita: ${srtContent.length} caractere`);
+                } else {
+                    res.writeHead(404, { 'Content-Type': 'text/plain' });
+                    res.end('Subtitrare negasita');
+                    console.log('Subtitrare negasita');
+                }
+            } catch (error) {
+                console.error(`Eroare proxy: ${error.message}`);
+                res.writeHead(500, { 'Content-Type': 'text/plain' });
+                res.end('Eroare server');
+            }
+        } else {
+            // Pentru toate celelalte request-uri, folosim handler-ul Stremio original
+            for (const listener of originalListeners) {
+                listener.call(server, req, res);
+            }
+        }
+    });
 }).catch(error => {
     console.error('Eroare pornire server:', error);
     process.exit(1);
