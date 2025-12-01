@@ -37,7 +37,84 @@ const COMMON_HEADERS = {
 // Cache pentru URL-urile originale ale subtitrărilor
 const subtitleUrlCache = new Map();
 
-// Funcție pentru normalizare text
+// Funcție pentru a detecta și converti encoding-ul corect pentru română
+function decodeRomanianText(buffer) {
+    // Încercăm mai multe encoding-uri specifice limbii române
+    const encodings = [
+        'utf8',           // UTF-8 (modern)
+        'latin1',         // ISO-8859-1 
+        'windows-1250',   // Windows Central European (cel mai comun pentru .ro)
+        'iso-8859-2',     // ISO Latin-2
+    ];
+    
+    for (const encoding of encodings) {
+        try {
+            let text;
+            if (encoding === 'windows-1250' || encoding === 'iso-8859-2') {
+                // Pentru Windows-1250 și ISO-8859-2, folosim un decoder manual
+                text = decodeWindows1250(buffer);
+            } else {
+                text = buffer.toString(encoding);
+            }
+            
+            // Verificăm dacă conține caractere românești corecte
+            const hasRomanianChars = /[șțăîâȘȚĂÎÂ]/.test(text);
+            const hasReplacementChars = /�|�/.test(text);
+            
+            // Dacă găsim caractere românești și nu avem caractere de replacement, e bun
+            if (hasRomanianChars && !hasReplacementChars) {
+                console.log(`✅ Encoding detectat: ${encoding}`);
+                return text;
+            }
+            
+            // Dacă nu are caractere de replacement, poate fi valid (chiar dacă nu are diacritice)
+            if (!hasReplacementChars && text.length > 100) {
+                console.log(`✅ Encoding folosit: ${encoding} (fără diacritice detectate)`);
+                return text;
+            }
+        } catch (e) {
+            continue;
+        }
+    }
+    
+    // Dacă nimic nu merge, folosim UTF-8 ca fallback
+    console.log('⚠️ Folosesc UTF-8 ca fallback');
+    return buffer.toString('utf8');
+}
+
+// Decoder manual pentru Windows-1250
+function decodeWindows1250(buffer) {
+    // Mapare Windows-1250 pentru caracterele românești
+    const win1250Map = {
+        0x8A: 'Ș', 0x9A: 'ș',  // Ș ș
+        0x8C: 'Ț', 0x9C: 'ț',  // Ț ț  
+        0xC3: 'Ă', 0xE3: 'ă',  // Ă ă
+        0xCE: 'Î', 0xEE: 'î',  // Î î
+        0xC2: 'Â', 0xE2: 'â',  // Â â
+    };
+    
+    let result = '';
+    for (let i = 0; i < buffer.length; i++) {
+        const byte = buffer[i];
+        if (win1250Map[byte]) {
+            result += win1250Map[byte];
+        } else if (byte < 128) {
+            result += String.fromCharCode(byte);
+        } else {
+            // Pentru alte caractere extinse, folosim maparea standard Windows-1250
+            result += String.fromCharCode(byte);
+        }
+    }
+    return result;
+}
+
+// Funcție pentru a extrage ID-ul subtitrării din link
+function extractSubtitleId(href) {
+    const match = href.match(/id=(\d+)/);
+    return match ? match[1] : null;
+}
+
+// Funcție pentru normalizare text (după decodare)
 function normalize(text) {
     return text
         .toLowerCase()
@@ -46,12 +123,6 @@ function normalize(text) {
         .replace(/[^a-z0-9\s]/g, '')
         .replace(/\s+/g, ' ')
         .trim();
-}
-
-// Funcție pentru a extrage ID-ul subtitrării din link
-function extractSubtitleId(href) {
-    const match = href.match(/id=(\d+)/);
-    return match ? match[1] : null;
 }
 
 // Funcție pentru a extrage/descărca subtitrare (ZIP, RAR sau direct SRT/SUB)
@@ -94,11 +165,8 @@ async function extractSrtFromZip(downloadUrl, subId) {
                         console.log(`✅ Găsit subtitrare: ${entry.entryName}`);
                         const content = entry.getData();
                         
-                        let textContent = content.toString('utf8');
-                        
-                        if (textContent.includes('�')) {
-                            textContent = content.toString('latin1');
-                        }
+                        // Folosim funcția de decodare inteligentă
+                        const textContent = decodeRomanianText(content);
                         
                         return textContent;
                     }
@@ -135,11 +203,9 @@ async function extractSrtFromZip(downloadUrl, subId) {
                         
                         if (files.length > 0 && files[0].extraction) {
                             const content = files[0].extraction;
-                            let textContent = Buffer.from(content).toString('utf8');
                             
-                            if (textContent.includes('�')) {
-                                textContent = Buffer.from(content).toString('latin1');
-                            }
+                            // Folosim funcția de decodare inteligentă
+                            const textContent = decodeRomanianText(Buffer.from(content));
                             
                             return textContent;
                         }
@@ -158,12 +224,8 @@ async function extractSrtFromZip(downloadUrl, subId) {
         else {
             console.log('📄 Fișier text direct (SRT/SUB) - nu e arhivă');
             
-            let textContent = buffer.toString('utf8');
-            
-            if (textContent.includes('�') || textContent.includes('\ufffd')) {
-                console.log('🔄 Encoding UTF-8 invalid, încerc Latin1/CP1250...');
-                textContent = buffer.toString('latin1');
-            }
+            // Folosim funcția de decodare inteligentă
+            const textContent = decodeRomanianText(buffer);
             
             if (/^\d+\s*\n/.test(textContent) || textContent.includes('-->')) {
                 console.log(`✅ Subtitrare validă (${textContent.length} caractere)`);
@@ -586,6 +648,11 @@ const server = http.createServer(async (req, res) => {
                 <h2>📝 Instalare manuală:</h2>
                 <p>Copiază acest URL în Stremio:</p>
                 <code>https://${req.headers.host}/manifest.json</code>
+                
+                <hr style="margin: 40px 0; border: none; border-top: 1px solid #ddd;">
+                <p style="text-align: center; color: #8A2BE2; font-style: italic; font-size: 18px;">
+                    <strong>Ți-am zis că reușesc, așa-i? :D</strong>
+                </p>
             </body>
             </html>
         `);
