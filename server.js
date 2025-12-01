@@ -412,29 +412,45 @@ const server = http.createServer(async (req, res) => {
         console.log('🎬 Cerere subtitrări Stremio:', parsedUrl.pathname);
         
         // Extragem parametrii din URL
-        // Format: /subtitles/movie/tt1375666/...json
+        // Format: /subtitles/movie/tt1375666/filename=...json
         const pathParts = parsedUrl.pathname.split('/');
         const type = pathParts[2]; // movie sau series
-        const id = pathParts[3]; // tt1375666 sau tt1375666:1:1
+        const idPart = pathParts[3]; // tt1375666 sau tt1375666:1:1 + alte params
+        
+        // Extragem doar ID-ul IMDB (fără parametrii extra)
+        const id = idPart.split(/[?&]/)[0]; // ia doar partea până la ? sau &
         
         console.log('📝 Type:', type, 'ID:', id);
         
         try {
-            const result = await addonInterface.get({ 
-                resource: 'subtitles',
-                type: type,
-                id: id
-            });
+            // Apelăm handler-ul direct
+            const imdbId = id.split(':')[0];
+            let season, episode;
+            
+            if (type === 'series') {
+                const parts = id.split(':');
+                season = parts[1];
+                episode = parts[2];
+            }
+            
+            console.log('🔍 Caut subtitrări pentru:', imdbId, season ? `S${season}E${episode}` : '');
+            
+            const subtitles = await searchSubtitles(imdbId, type, season, episode);
             
             res.writeHead(200, { 
                 'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*'
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Methods': 'GET, OPTIONS',
+                'Access-Control-Allow-Headers': 'Content-Type'
             });
-            res.end(JSON.stringify(result));
-            console.log('✅ Răspuns trimis:', result.subtitles?.length || 0, 'subtitrări');
+            res.end(JSON.stringify({ subtitles }));
+            console.log('✅ Răspuns trimis:', subtitles.length, 'subtitrări');
         } catch (error) {
             console.error('❌ Eroare procesare cerere Stremio:', error);
-            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.writeHead(500, { 
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            });
             res.end(JSON.stringify({ subtitles: [] }));
         }
         return;
