@@ -2,6 +2,7 @@
 const { addonBuilder, serveHTTP } = require('stremio-addon-sdk');
 const axios = require('axios');
 const cheerio = require('cheerio');
+const AdmZip = require('adm-zip');
 
 // Definirea manifestului addon-ului
 const manifest = {
@@ -47,55 +48,56 @@ function extractSubtitleId(href) {
     return match ? match[1] : null;
 }
 
-// Funcție pentru a obține link-ul DIRECT de download
-async function getDirectDownloadUrl(getPhpUrl) {
+// Cache pentru URL-urile originale ale subtitrărilor
+const subtitleUrlCache = new Map();
+
+// Funcție pentru a extrage SRT din ZIP
+async function extractSrtFromZip(zipUrl, subId) {
     try {
-        console.log(`🔗 Obțin link direct pentru: ${getPhpUrl}`);
+        console.log(`📥 Descarc ZIP: ${zipUrl}`);
         
-        // Facem request la get.php și urmărim redirect-urile
-        const response = await axios.get(getPhpUrl, {
+        // Descărcăm ZIP-ul
+        const response = await axios.get(zipUrl, {
             headers: COMMON_HEADERS,
-            maxRedirects: 0, // Nu urmărim automat redirect-urile
-            validateStatus: (status) => status >= 200 && status < 400,
-            timeout: 10000
+            responseType: 'arraybuffer',
+            timeout: 30000
         });
         
-        // Dacă primim redirect (302, 301)
-        if (response.status === 302 || response.status === 301) {
-            const redirectUrl = response.headers.location;
-            if (redirectUrl) {
-                console.log(`✅ Redirect găsit: ${redirectUrl}`);
-                return redirectUrl.startsWith('http') ? redirectUrl : `https://titrari.ro${redirectUrl}`;
+        console.log(`✅ ZIP descărcat: ${response.data.length} bytes`);
+        
+        // Extragem conținutul ZIP-ului
+        const zip = new AdmZip(response.data);
+        const zipEntries = zip.getEntries();
+        
+        console.log(`📦 Fișiere în ZIP: ${zipEntries.length}`);
+        
+        // Căutăm fișierul SRT/SUB
+        for (const entry of zipEntries) {
+            const fileName = entry.entryName.toLowerCase();
+            console.log(`   - ${entry.entryName}`);
+            
+            if (fileName.endsWith('.srt') || fileName.endsWith('.sub')) {
+                console.log(`✅ Găsit subtitrare: ${entry.entryName}`);
+                const content = entry.getData();
+                
+                // Convertim la UTF-8 dacă e necesar
+                let textContent = content.toString('utf8');
+                
+                // Dacă conține caractere ciudate, încearcă alte encodings
+                if (textContent.includes('�')) {
+                    textContent = content.toString('latin1');
+                }
+                
+                return textContent;
             }
         }
         
-        // Dacă primim HTML, căutăm link-ul de download în pagină
-        if (response.data && typeof response.data === 'string') {
-            const $ = cheerio.load(response.data);
-            
-            // Căutăm link-uri către fișiere .zip, .srt, .sub
-            const downloadLink = $('a[href*=".zip"], a[href*=".srt"], a[href*=".sub"]').first().attr('href');
-            
-            if (downloadLink) {
-                console.log(`✅ Link direct găsit în HTML: ${downloadLink}`);
-                return downloadLink.startsWith('http') ? downloadLink : `https://titrari.ro${downloadLink}`;
-            }
-        }
-        
-        // Dacă nu găsim nimic, returnăm URL-ul original
-        console.log(`⚠️ Nu s-a găsit redirect, folosim URL-ul original`);
-        return getPhpUrl;
+        console.log('⚠️ Nu s-a găsit fișier SRT în ZIP');
+        return null;
         
     } catch (error) {
-        if (error.response && error.response.headers.location) {
-            // Redirect găsit în eroare
-            const redirectUrl = error.response.headers.location;
-            console.log(`✅ Redirect din eroare: ${redirectUrl}`);
-            return redirectUrl.startsWith('http') ? redirectUrl : `https://titrari.ro${redirectUrl}`;
-        }
-        
-        console.error(`❌ Eroare obținere link direct: ${error.message}`);
-        return getPhpUrl; // Fallback la URL-ul original
+        console.error(`❌ Eroare extragere SRT: ${error.message}`);
+        return null;
     }
 }
 
@@ -220,8 +222,10 @@ async function searchByImdbId(imdbId, type, season, episode) {
                 ? downloadLink 
                 : `https://titrari.ro/${downloadLink}`;
             
-            // Obținem link-ul DIRECT de download
-            const directUrl = await getDirectDownloadUrl(fullUrl);
+            // Folosim direct URL-ul (get.php returnează fișierul direct)
+            const directUrl = fullUrl;
+            
+            console.log(`🔗 URL subtitrare: ${directUrl}`);
             
             // Construim titlul descriptiv
             let displayTitle = '🇷🇴 Titrari.ro';
@@ -246,22 +250,31 @@ async function searchByImdbId(imdbId, type, season, episode) {
                 displayTitle += ` ↓${downloads}`;
             }
             
+            // Cream URL proxy prin serverul nostru pentru a extrage SRT din ZIP
+            const proxyUrl = `${process.env.PROXY_URL || 'http://localhost:7000'}/subtitle/${subId}.srt`;
+            
             subtitles.push({
                 id: `titrari:${subId}`,
-                url: directUrl,
+                url: proxyUrl, // URL-ul proxy care va extrage SRT-ul
                 lang: 'ron',
                 title: displayTitle,
-                downloads: parseInt(downloads) || 0
+                downloads: parseInt(downloads) || 0,
+                _originalUrl: directUrl // Păstrăm URL-ul original pentru proxy
             });
             
             console.log(`✅ ${displayTitle}`);
-            
-            // Delay mic pentru a nu suprasolicita serverul
-            await new Promise(resolve => setTimeout(resolve, 200));
         }
         
         // Sortăm după popularitate
         subtitles.sort((a, b) => b.downloads - a.downloads);
+        
+        // Salvăm URL-urile originale în cache pentru endpoint-ul proxy
+        subtitles.forEach(sub => {
+            if (sub._originalUrl) {
+                subtitleUrlCache.set(sub.id.split(':')[1], sub._originalUrl);
+                delete sub._originalUrl; // Ștergem din obiectul returnat
+            }
+        });
         
         console.log(`📊 Total: ${subtitles.length} subtitrări`);
         
@@ -329,9 +342,69 @@ builder.defineSubtitlesHandler(async (args) => {
 
 // Pornește serverul
 const port = process.env.PORT || 7000;
+
+// Cream server HTTP custom pentru a adăuga endpoint-ul /subtitle
+const http = require('http');
+const url = require('url');
+
+const server = http.createServer(async (req, res) => {
+    const parsedUrl = url.parse(req.url, true);
+    
+    // Endpoint pentru descărcare subtitrări
+    if (parsedUrl.pathname.startsWith('/subtitle/')) {
+        const match = parsedUrl.pathname.match(/\/subtitle\/(\d+)\.srt/);
+        
+        if (!match) {
+            res.writeHead(404, { 'Content-Type': 'text/plain' });
+            res.end('Not found');
+            return;
+        }
+        
+        const subId = match[1];
+        const originalUrl = subtitleUrlCache.get(subId);
+        
+        if (!originalUrl) {
+            res.writeHead(404, { 'Content-Type': 'text/plain' });
+            res.end('Subtitle not found in cache');
+            return;
+        }
+        
+        console.log(`\n📥 Request subtitrare: ${subId}`);
+        console.log(`🔗 URL original: ${originalUrl}`);
+        
+        try {
+            const srtContent = await extractSrtFromZip(originalUrl, subId);
+            
+            if (!srtContent) {
+                res.writeHead(500, { 'Content-Type': 'text/plain' });
+                res.end('Failed to extract subtitle');
+                return;
+            }
+            
+            res.writeHead(200, {
+                'Content-Type': 'text/plain; charset=utf-8',
+                'Content-Disposition': `attachment; filename="subtitle_${subId}.srt"`,
+                'Access-Control-Allow-Origin': '*'
+            });
+            res.end(srtContent);
+            
+            console.log(`✅ Subtitrare servită: ${srtContent.length} caractere\n`);
+            
+        } catch (error) {
+            console.error(`❌ Eroare servire subtitrare: ${error.message}`);
+            res.writeHead(500, { 'Content-Type': 'text/plain' });
+            res.end('Error serving subtitle');
+        }
+        
+        return;
+    }
+    
+    // Pentru alte cereri, nu facem nimic (le va gestiona Stremio SDK)
+});
+
+// Montăm Stremio addon pe server-ul nostru
 serveHTTP(builder.getInterface(), { 
-    port: port,
-    hostname: '0.0.0.0'
+    server: server
 });
 
 console.log('\n' + '🚀'.repeat(30));
