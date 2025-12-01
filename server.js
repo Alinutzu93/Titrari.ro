@@ -651,7 +651,7 @@ const server = http.createServer(async (req, res) => {
                 
                 <hr style="margin: 40px 0; border: none; border-top: 1px solid #ddd;">
                 <p style="text-align: center; color: #8A2BE2; font-style: italic; font-size: 18px;">
-                    <strong>Ți-am zis că reușesc, așa-i? :D</strong>
+                    <strong>Ți-am zis că reușesc, așa-i? :P</strong>
                 </p>
             </body>
             </html>
